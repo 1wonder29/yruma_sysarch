@@ -55,9 +55,9 @@ const CertificatesPage = () => {
   const [secretaryName, setSecretaryName] = useState('PAULA MARIE D. BAILON');
   const [placeIssued, setPlaceIssued] = useState('Barangay Hall');
   const [serialNumber, setSerialNumber] = useState('');
-  const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
   const [profileLoading, setProfileLoading] = useState(false);
+  const [certificates, setCertificates] = useState([]);
 
   // ---- NEW: officials state comes BEFORE effects that use it
   const [officials, setOfficials] = useState([]);
@@ -108,6 +108,59 @@ const CertificatesPage = () => {
     };
     loadOfficials();
   }, []);
+
+  // Load certificates to generate serial numbers
+  useEffect(() => {
+    const loadCertificates = async () => {
+      try {
+        const res = await api.get('/certificates');
+        setCertificates(res.data || []);
+      } catch (err) {
+        console.error('Error loading certificates', err);
+      }
+    };
+    loadCertificates();
+  }, []);
+
+  // Generate serial number based on certificate type
+  const generateSerialNumber = (type, date, certList = certificates) => {
+    const year = new Date(date).getFullYear();
+    const prefixMap = {
+      'residency': 'CR',
+      'indigency': 'CI',
+      'clearance': 'BC',
+      'general': 'GC',
+      'jobseeker': 'FTJ',
+      'oath': 'OU',
+      'good_moral': 'CGM',
+    };
+    
+    const prefix = prefixMap[type] || 'CERT';
+    const pattern = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+    
+    // Find the highest number for this type and year
+    const existingSerials = certList
+      .filter(c => c && c.certificate_type === type && c.serial_number && typeof c.serial_number === 'string' && c.serial_number.match(pattern))
+      .map(c => {
+        const match = c.serial_number.match(pattern);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(num => !isNaN(num) && num > 0);
+    
+    const nextNumber = existingSerials.length > 0 
+      ? Math.max(...existingSerials) + 1 
+      : 1;
+    
+    return `${prefix}-${year}-${String(nextNumber).padStart(3, '0')}`;
+  };
+
+  // Auto-generate serial number when certType or issueDate changes
+  useEffect(() => {
+    if (certType && issueDate) {
+      const generated = generateSerialNumber(certType, issueDate);
+      setSerialNumber(generated);
+    }
+  }, [certType, issueDate, certificates]);
 
   // When officials change, auto-set captain & secretary names
   useEffect(() => {
@@ -245,10 +298,13 @@ This certification is being issued upon the request of the above-named person fo
       return;
     }
 
-    if (!serialNumber || serialNumber.trim() === '') {
-      setError('Serial Number is required.');
+    if (!selectedResident) {
+      setError('Please select a resident.');
       return;
     }
+
+    // Auto-generate serial number if not set
+    const serialNo = serialNumber.trim() || generateSerialNumber(certType, issueDate);
 
     const doc = new jsPDF({
       orientation: 'portrait',
@@ -261,7 +317,6 @@ This certification is being issued upon the request of the above-named person fo
     const maritalStatus = selectedResident.civil_status || 'N/A';
     const citizenship = selectedResident.citizenship || 'Filipino';
     const currentYear = new Date(issueDate).getFullYear();
-    const serialNo = serialNumber.trim();
 
     const certTitleObj = CERTIFICATE_TYPES.find((c) => c.value === certType);
     const certTitle = certTitleObj ? certTitleObj.label.toUpperCase() : 'CERTIFICATE';
@@ -513,8 +568,10 @@ This certification is being issued upon the request of the above-named person fo
         purpose: purpose || null,
         issue_date: issueDate,
         place_issued: placeIssued || null,
-        amount: amount || null,
       });
+      // Reload certificates to update serial number generation
+      const res = await api.get('/certificates');
+      setCertificates(res.data || []);
     } catch (err) {
       console.error('Error saving certificate record:', err);
       // Don't show error to user as PDF was already generated
@@ -528,10 +585,8 @@ This certification is being issued upon the request of the above-named person fo
       return;
     }
 
-    if (!serialNumber || serialNumber.trim() === '') {
-      setError('Serial Number is required.');
-      return;
-    }
+    // Auto-generate serial number if not set
+    const serialNo = serialNumber.trim() || generateSerialNumber(certType, issueDate);
 
     try {
       const fullName = buildFullName(selectedResident);
@@ -539,7 +594,6 @@ This certification is being issued upon the request of the above-named person fo
       const maritalStatus = selectedResident.civil_status || 'N/A';
       const citizenship = selectedResident.citizenship || 'Filipino';
       const currentYear = new Date(issueDate).getFullYear();
-      const serialNo = serialNumber.trim();
       const certTitleObj = CERTIFICATE_TYPES.find((c) => c.value === certType);
       const certTitle = certTitleObj ? certTitleObj.label.toUpperCase() : 'CERTIFICATE';
       const ageNum = calculateAge(selectedResident.birthdate);
@@ -889,8 +943,10 @@ This certification is being issued upon the request of the above-named person fo
           purpose: purpose || null,
           issue_date: issueDate,
           place_issued: placeIssued || null,
-          amount: amount || null,
         });
+        // Reload certificates to update serial number generation
+        const res = await api.get('/certificates');
+        setCertificates(res.data || []);
       } catch (err) {
         console.error('Error saving certificate record:', err);
         // Don't show error to user as Word doc was already generated
@@ -980,21 +1036,17 @@ This certification is being issued upon the request of the above-named person fo
                 />
               </Grid>
 
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={6}>
                 <TextField
                   label="Serial Number"
                   value={serialNumber}
                   onChange={(e) => setSerialNumber(e.target.value)}
                   fullWidth
                   required
-                />
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  label="Amount (₱)"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  fullWidth
+                  helperText="Auto-generated based on certificate type"
+                  InputProps={{
+                    readOnly: false,
+                  }}
                 />
               </Grid>
             </Grid>
@@ -1109,7 +1161,7 @@ This certification is being issued upon the request of the above-named person fo
                   borderBottom: '1px solid #ccc',
                   fontWeight: 'bold'
                 }}>
-                  {serialNumber || '[Enter Serial Number]'}
+                  {serialNumber || generateSerialNumber(certType, issueDate) || '[Auto-generating...]'}
                 </span>
               </Typography>
             </Box>
