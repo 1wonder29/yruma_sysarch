@@ -19,11 +19,13 @@ app.use(express.json());
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
 
-// ====== Multer setup for official signatures ======
+// ====== Multer setup for official signatures and photos ======
 const signaturesDir = 'uploads/signatures';
+const photosDir = 'uploads/photos';
 fs.mkdirSync(signaturesDir, { recursive: true });
+fs.mkdirSync(photosDir, { recursive: true });
 
-const storage = multer.diskStorage({
+const signatureStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, signaturesDir);
   },
@@ -34,7 +36,38 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const photoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, photosDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext);
+    cb(null, `${Date.now()}-${base}${ext}`);
+  },
+});
+
+const uploadSignature = multer({ storage: signatureStorage });
+const uploadPhoto = multer({ storage: photoStorage });
+const upload = multer({ 
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      // Determine destination based on field name
+      if (file.fieldname === 'signature') {
+        cb(null, signaturesDir);
+      } else if (file.fieldname === 'photo') {
+        cb(null, photosDir);
+      } else {
+        cb(null, signaturesDir); // default
+      }
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const base = path.basename(file.originalname, ext);
+      cb(null, `${Date.now()}-${base}${ext}`);
+    },
+  })
+});
 
 // MySQL connection pool
 const pool = mysql.createPool({
@@ -48,8 +81,46 @@ const pool = mysql.createPool({
 });
 
 async function query(sql, params = []) {
-  const [rows] = await pool.query(sql, params);
-  return rows;
+  try {
+    const [rows] = await pool.query(sql, params);
+    return rows;
+  } catch (err) {
+    console.error('Database query error:', err.message);
+    console.error('SQL:', sql);
+    console.error('Params:', params);
+    throw err;
+  }
+}
+
+// ====== Helper function to create history logs ======
+async function createLog(req, action, moduleType = null, certificateType = null, residentId = null, residentName = null, details = null) {
+  try {
+    if (!req || !req.user) return; // Skip if no user (public endpoints)
+    
+    // Check if history_logs table exists by trying to query it
+    await query(
+      `INSERT INTO history_logs 
+       (user_id, user_role, user_name, action, module_type, certificate_type, resident_id, resident_name, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        req.user.role || 'Unknown',
+        req.user.full_name || req.user.username,
+        action,
+        moduleType,
+        certificateType,
+        residentId,
+        residentName,
+        details
+      ]
+    );
+  } catch (err) {
+    // Silently fail - logging should not break the main functionality
+    // Only log to console if it's not a table doesn't exist error
+    if (!err.message || !err.message.includes("doesn't exist")) {
+      console.error('Error creating history log:', err.message);
+    }
+  }
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
@@ -173,13 +244,71 @@ app.get('/api/auth/me', verifyToken, async (req, res) => {
 // GET /api/residents - public view
 app.get('/api/residents', async (req, res) => {
   try {
-    const residents = await query(
-      'SELECT * FROM residents ORDER BY last_name, first_name'
-    );
-    res.json(residents);
+    // First, check if table exists and get column names
+    let columns;
+    try {
+      columns = await query('SHOW COLUMNS FROM residents');
+      const columnNames = columns.map(col => col.Field);
+      
+      // Build SELECT query with only columns that exist
+      const selectColumns = ['id', 'last_name', 'first_name', 'sex', 'created_at']; // Required columns
+      const optionalColumns = [
+        'middle_name', 'suffix', 'birthdate', 'civil_status', 
+        'contact_no', 'address', 'citizenship', 'employment_status'
+      ];
+      
+      for (const colName of optionalColumns) {
+        if (columnNames.includes(colName)) {
+          selectColumns.push(colName);
+        }
+      }
+      
+      const residents = await query(
+        `SELECT ${selectColumns.join(', ')} FROM residents ORDER BY last_name, first_name`
+      );
+      
+      // Add defaults for missing optional fields
+      const residentsWithDefaults = residents.map(r => ({
+        ...r,
+        employment_status: r.employment_status || 'Not Working',
+        citizenship: r.citizenship || 'Filipino'
+      }));
+      
+      res.json(residentsWithDefaults);
+    } catch (tableErr) {
+      console.error('Error checking table structure:', tableErr);
+      // Fallback: try simple SELECT *
+      try {
+        const residents = await query(
+          'SELECT * FROM residents ORDER BY last_name, first_name'
+        );
+        const residentsWithDefaults = residents.map(r => ({
+          ...r,
+          employment_status: r.employment_status || 'Not Working',
+          citizenship: r.citizenship || 'Filipino'
+        }));
+        res.json(residentsWithDefaults);
+      } catch (selectErr) {
+        // Last resort: select only required columns
+        const residents = await query(
+          'SELECT id, last_name, first_name, sex, created_at FROM residents ORDER BY last_name, first_name'
+        );
+        const residentsWithDefaults = residents.map(r => ({
+          ...r,
+          employment_status: 'Not Working',
+          citizenship: 'Filipino'
+        }));
+        res.json(residentsWithDefaults);
+      }
+    }
   } catch (err) {
     console.error('Error fetching residents:', err);
-    res.status(500).json({ message: 'Error fetching residents' });
+    console.error('Error stack:', err.stack);
+    res.status(500).json({ 
+      message: 'Error fetching residents',
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
@@ -195,7 +324,9 @@ app.post('/api/residents', verifyToken, async (req, res) => {
       birthdate,
       civil_status,
       contact_no,
+      employment_status,
       address,
+      citizenship,
     } = req.body;
 
     if (!last_name || !first_name || !sex) {
@@ -204,32 +335,129 @@ app.post('/api/residents', verifyToken, async (req, res) => {
         .json({ message: 'last_name, first_name, and sex are required.' });
     }
 
-    const result = await query(
-      `INSERT INTO residents
-       (last_name, first_name, middle_name, suffix, sex, birthdate,
-        civil_status, contact_no, address)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        last_name,
-        first_name,
-        middle_name || null,
-        suffix || null,
-        sex,
-        birthdate || null,
-        civil_status || null,
-        contact_no || null,
-        address || null,
-      ]
-    );
+    // Check which columns exist in the table
+    let columns;
+    try {
+      columns = await query('SHOW COLUMNS FROM residents');
+      const columnNames = columns.map(col => col.Field);
+      
+      // Build INSERT query dynamically based on available columns
+      const insertColumns = ['last_name', 'first_name', 'sex']; // Required columns
+      const insertValues = [last_name, first_name, sex];
+      
+      // Add optional columns only if they exist in the database
+      const optionalColumns = {
+        'middle_name': middle_name || null,
+        'suffix': suffix || null,
+        'birthdate': birthdate || null,
+        'civil_status': civil_status || null,
+        'contact_no': contact_no || null,
+        'address': address || null,
+        'citizenship': citizenship || 'Filipino',
+        'employment_status': employment_status || 'Not Working'
+      };
+      
+      for (const [colName, colValue] of Object.entries(optionalColumns)) {
+        if (columnNames.includes(colName)) {
+          insertColumns.push(colName);
+          insertValues.push(colValue);
+        }
+      }
+      
+      const placeholders = insertColumns.map(() => '?').join(', ');
+      const result = await query(
+        `INSERT INTO residents (${insertColumns.join(', ')}) VALUES (${placeholders})`,
+        insertValues
+      );
 
-    const created = await query('SELECT * FROM residents WHERE id = ?', [
-      result.insertId,
-    ]);
+      // Get created resident - only select columns that exist
+      const selectColumns = ['id', 'last_name', 'first_name', 'sex', 'created_at'];
+      const allSelectableColumns = [
+        'middle_name', 'suffix', 'birthdate', 'civil_status', 
+        'contact_no', 'address', 'citizenship', 'employment_status'
+      ];
+      
+      for (const colName of allSelectableColumns) {
+        if (columnNames.includes(colName)) {
+          selectColumns.push(colName);
+        }
+      }
+      
+      const created = await query(
+        `SELECT ${selectColumns.join(', ')} FROM residents WHERE id = ?`,
+        [result.insertId]
+      );
+      
+      // Ensure optional fields exist in response with defaults
+      if (created[0]) {
+        if (!created[0].employment_status) {
+          created[0].employment_status = 'Not Working';
+        }
+        if (!created[0].citizenship) {
+          created[0].citizenship = 'Filipino';
+        }
+      }
 
-    res.status(201).json(created[0]);
+      // Log resident creation
+      const residentName = `${last_name}, ${first_name} ${middle_name ? `${middle_name.charAt(0)}.` : ''} ${suffix || ''}`.trim();
+      await createLog(
+        req,
+        `created a new resident: ${residentName}`,
+        'Residents',
+        null,
+        result.insertId,
+        residentName
+      );
+
+      res.status(201).json(created[0]);
+    } catch (tableErr) {
+      console.error('Error checking table structure:', tableErr);
+      // Fallback: try simple INSERT with only required columns
+      const result = await query(
+        `INSERT INTO residents (last_name, first_name, sex)
+         VALUES (?, ?, ?)`,
+        [last_name, first_name, sex]
+      );
+      
+      // Try to get created resident with SELECT *
+      let created;
+      try {
+        created = await query('SELECT * FROM residents WHERE id = ?', [result.insertId]);
+      } catch (selectErr) {
+        // If SELECT * fails, try with minimal columns
+        created = await query(
+          `SELECT id, last_name, first_name, sex, created_at
+           FROM residents WHERE id = ?`,
+          [result.insertId]
+        );
+      }
+      
+      if (created[0]) {
+        // Add defaults for missing fields
+        if (!created[0].employment_status) created[0].employment_status = 'Not Working';
+        if (!created[0].citizenship) created[0].citizenship = 'Filipino';
+      }
+      
+      // Log resident creation
+      const residentName = `${last_name}, ${first_name} ${middle_name ? `${middle_name.charAt(0)}.` : ''} ${suffix || ''}`.trim();
+      await createLog(
+        req,
+        `created a new resident: ${residentName}`,
+        'Residents',
+        null,
+        result.insertId,
+        residentName
+      );
+
+      res.status(201).json(created[0]);
+    }
   } catch (err) {
     console.error('Error creating resident:', err);
-    res.status(500).json({ message: 'Error creating resident' });
+    console.error('Error stack:', err.stack);
+    res.status(500).json({ 
+      message: 'Error creating resident',
+      error: err.message
+    });
   }
 });
 
@@ -246,33 +474,134 @@ app.put('/api/residents/:id', verifyToken, async (req, res) => {
       birthdate,
       civil_status,
       contact_no,
+      employment_status,
       address,
+      citizenship,
     } = req.body;
 
-    await query(
-      `UPDATE residents
-       SET last_name = ?, first_name = ?, middle_name = ?, suffix = ?,
-           sex = ?, birthdate = ?, civil_status = ?, contact_no = ?, address = ?
-       WHERE id = ?`,
-      [
-        last_name,
-        first_name,
-        middle_name || null,
-        suffix || null,
-        sex,
-        birthdate || null,
-        civil_status || null,
-        contact_no || null,
-        address || null,
-        id,
-      ]
-    );
+    // Check which columns exist in the table
+    let columns;
+    try {
+      columns = await query('SHOW COLUMNS FROM residents');
+      const columnNames = columns.map(col => col.Field);
+      
+      // Build UPDATE query dynamically based on available columns
+      const updateFields = ['last_name = ?', 'first_name = ?', 'sex = ?']; // Required columns
+      const updateValues = [last_name, first_name, sex];
+      
+      // Add optional columns only if they exist in the database
+      const optionalColumns = {
+        'middle_name': middle_name || null,
+        'suffix': suffix || null,
+        'birthdate': birthdate || null,
+        'civil_status': civil_status || null,
+        'contact_no': contact_no || null,
+        'address': address || null,
+        'citizenship': citizenship || 'Filipino',
+        'employment_status': employment_status || 'Not Working'
+      };
+      
+      for (const [colName, colValue] of Object.entries(optionalColumns)) {
+        if (columnNames.includes(colName)) {
+          updateFields.push(`${colName} = ?`);
+          updateValues.push(colValue);
+        }
+      }
+      
+      updateValues.push(id); // Add id for WHERE clause
+      
+      await query(
+        `UPDATE residents SET ${updateFields.join(', ')} WHERE id = ?`,
+        updateValues
+      );
 
-    const updated = await query('SELECT * FROM residents WHERE id = ?', [id]);
-    res.json(updated[0]);
+      // Get updated resident - only select columns that exist
+      const selectColumns = ['id', 'last_name', 'first_name', 'sex', 'created_at'];
+      const allSelectableColumns = [
+        'middle_name', 'suffix', 'birthdate', 'civil_status', 
+        'contact_no', 'address', 'citizenship', 'employment_status'
+      ];
+      
+      for (const colName of allSelectableColumns) {
+        if (columnNames.includes(colName)) {
+          selectColumns.push(colName);
+        }
+      }
+      
+      const updated = await query(
+        `SELECT ${selectColumns.join(', ')} FROM residents WHERE id = ?`,
+        [id]
+      );
+      
+      // Ensure optional fields exist in response with defaults
+      if (updated[0]) {
+        if (!updated[0].employment_status) {
+          updated[0].employment_status = 'Not Working';
+        }
+        if (!updated[0].citizenship) {
+          updated[0].citizenship = 'Filipino';
+        }
+      }
+      
+      // Log resident update
+      const residentName = `${last_name}, ${first_name} ${middle_name ? `${middle_name.charAt(0)}.` : ''} ${suffix || ''}`.trim();
+      await createLog(
+        req,
+        `updated resident information: ${residentName}`,
+        'Residents',
+        null,
+        id,
+        residentName
+      );
+      
+      res.json(updated[0]);
+    } catch (tableErr) {
+      console.error('Error checking table structure:', tableErr);
+      // Fallback: try simple UPDATE with only required columns
+      await query(
+        `UPDATE residents SET last_name = ?, first_name = ?, sex = ? WHERE id = ?`,
+        [last_name, first_name, sex, id]
+      );
+      
+      // Try to get updated resident with SELECT *
+      let updated;
+      try {
+        updated = await query('SELECT * FROM residents WHERE id = ?', [id]);
+      } catch (selectErr) {
+        // If SELECT * fails, try with minimal columns
+        updated = await query(
+          `SELECT id, last_name, first_name, sex, created_at
+           FROM residents WHERE id = ?`,
+          [id]
+        );
+      }
+      
+      if (updated[0]) {
+        // Add defaults for missing fields
+        if (!updated[0].employment_status) updated[0].employment_status = 'Not Working';
+        if (!updated[0].citizenship) updated[0].citizenship = 'Filipino';
+      }
+      
+      // Log resident update
+      const residentName = `${last_name}, ${first_name} ${middle_name ? `${middle_name.charAt(0)}.` : ''} ${suffix || ''}`.trim();
+      await createLog(
+        req,
+        `updated resident information: ${residentName}`,
+        'Residents',
+        null,
+        id,
+        residentName
+      );
+      
+      res.json(updated[0]);
+    }
   } catch (err) {
     console.error('Error updating resident:', err);
-    res.status(500).json({ message: 'Error updating resident' });
+    console.error('Error stack:', err.stack);
+    res.status(500).json({ 
+      message: 'Error updating resident',
+      error: err.message
+    });
   }
 });
 
@@ -316,6 +645,18 @@ app.post('/api/households', verifyToken, async (req, res) => {
     const created = await query('SELECT * FROM households WHERE id = ?', [
       result.insertId,
     ]);
+    
+    // Log household creation
+    await createLog(
+      req,
+      `created a new household: ${household_name}`,
+      'Households',
+      null,
+      null,
+      null,
+      `Address: ${address}`
+    );
+    
     res.status(201).json(created[0]);
   } catch (err) {
     console.error('Error creating household:', err);
@@ -337,6 +678,18 @@ app.put('/api/households/:id', verifyToken, async (req, res) => {
     );
 
     const updated = await query('SELECT * FROM households WHERE id = ?', [id]);
+    
+    // Log household update
+    await createLog(
+      req,
+      `updated household: ${household_name}`,
+      'Households',
+      null,
+      null,
+      null,
+      `Address: ${address}`
+    );
+    
     res.json(updated[0]);
   } catch (err) {
     console.error('Error updating household:', err);
@@ -353,7 +706,14 @@ app.get('/api/households/:id/members', async (req, res) => {
               r.id AS resident_id,
               r.first_name,
               r.last_name,
-              hm.relation_to_head
+              r.middle_name,
+              r.suffix,
+              r.birthdate,
+              r.civil_status,
+              r.contact_no,
+              r.employment_status,
+              hm.relation_to_head,
+              TIMESTAMPDIFF(YEAR, r.birthdate, CURDATE()) AS age
        FROM household_members hm
        JOIN residents r ON r.id = hm.resident_id
        WHERE hm.household_id = ?
@@ -436,6 +796,7 @@ app.post('/api/incidents', verifyToken, async (req, res) => {
       location,
       description,
       complainant_id,
+      complainant_name,
       respondent_id,
       status,
     } = req.body;
@@ -446,25 +807,77 @@ app.post('/api/incidents', verifyToken, async (req, res) => {
         .json({ message: 'incident_date and incident_type are required.' });
     }
 
-    const result = await query(
-      `INSERT INTO incidents
-       (incident_date, incident_type, location, description,
-        complainant_id, respondent_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        incident_date,
-        incident_type,
-        location || null,
-        description || null,
-        complainant_id || null,
-        respondent_id || null,
-        status || 'Open',
-      ]
-    );
+    // Check if complainant_name column exists
+    let columns;
+    let hasComplainantName = false;
+    try {
+      columns = await query('SHOW COLUMNS FROM incidents');
+      const columnNames = columns.map(col => col.Field);
+      hasComplainantName = columnNames.includes('complainant_name');
+    } catch (err) {
+      console.error('Error checking columns:', err);
+    }
+
+    let result;
+    if (hasComplainantName) {
+      result = await query(
+        `INSERT INTO incidents
+         (incident_date, incident_type, location, description,
+          complainant_id, complainant_name, respondent_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          incident_date,
+          incident_type,
+          location || null,
+          description || null,
+          complainant_id || null,
+          complainant_name || null,
+          respondent_id || null,
+          status || 'Open',
+        ]
+      );
+    } else {
+      result = await query(
+        `INSERT INTO incidents
+         (incident_date, incident_type, location, description,
+          complainant_id, respondent_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          incident_date,
+          incident_type,
+          location || null,
+          description || null,
+          complainant_id || null,
+          respondent_id || null,
+          status || 'Open',
+        ]
+      );
+    }
 
     const created = await query('SELECT * FROM incidents WHERE id = ?', [
       result.insertId,
     ]);
+    
+    // Get complainant name for logging
+    let complainantDisplayName = complainant_name || '';
+    if (!complainantDisplayName && complainant_id) {
+      const complainant = await query('SELECT first_name, last_name FROM residents WHERE id = ?', [complainant_id]);
+      if (complainant[0]) {
+        complainantDisplayName = `${complainant[0].last_name}, ${complainant[0].first_name}`;
+      }
+    }
+    
+    // Log incident creation
+    await createLog(
+      req,
+      `created a new incident: ${incident_type}${complainantDisplayName ? ` reported by ${complainantDisplayName}` : ''}`,
+      'Incidents',
+      null,
+      null,
+      complainantDisplayName || null,
+      `Location: ${location || 'N/A'}, Status: ${status || 'Open'}`
+    );
+    
     res.status(201).json(created[0]);
   } catch (err) {
     console.error('Error creating incident:', err);
@@ -482,26 +895,58 @@ app.put('/api/incidents/:id', verifyToken, async (req, res) => {
       location,
       description,
       complainant_id,
+      complainant_name,
       respondent_id,
       status,
     } = req.body;
 
-    await query(
-      `UPDATE incidents
-       SET incident_date = ?, incident_type = ?, location = ?,
-           description = ?, complainant_id = ?, respondent_id = ?, status = ?
-       WHERE id = ?`,
-      [
-        incident_date,
-        incident_type,
-        location || null,
-        description || null,
-        complainant_id || null,
-        respondent_id || null,
-        status || 'Open',
-        id,
-      ]
-    );
+    // Check if complainant_name column exists
+    let columns;
+    let hasComplainantName = false;
+    try {
+      columns = await query('SHOW COLUMNS FROM incidents');
+      const columnNames = columns.map(col => col.Field);
+      hasComplainantName = columnNames.includes('complainant_name');
+    } catch (err) {
+      console.error('Error checking columns:', err);
+    }
+
+    if (hasComplainantName) {
+      await query(
+        `UPDATE incidents
+         SET incident_date = ?, incident_type = ?, location = ?,
+             description = ?, complainant_id = ?, complainant_name = ?, respondent_id = ?, status = ?
+         WHERE id = ?`,
+        [
+          incident_date,
+          incident_type,
+          location || null,
+          description || null,
+          complainant_id || null,
+          complainant_name || null,
+          respondent_id || null,
+          status || 'Open',
+          id,
+        ]
+      );
+    } else {
+      await query(
+        `UPDATE incidents
+         SET incident_date = ?, incident_type = ?, location = ?,
+             description = ?, complainant_id = ?, respondent_id = ?, status = ?
+         WHERE id = ?`,
+        [
+          incident_date,
+          incident_type,
+          location || null,
+          description || null,
+          complainant_id || null,
+          respondent_id || null,
+          status || 'Open',
+          id,
+        ]
+      );
+    }
 
     const updated = await query('SELECT * FROM incidents WHERE id = ?', [id]);
     res.json(updated[0]);
@@ -712,7 +1157,7 @@ app.get('/api/officials', async (req, res) => {
   try {
     const officials = await query(
       `SELECT id, full_name, position, order_no,
-              is_captain, is_secretary, signature_path
+              is_captain, is_secretary, signature_path, photo_path
        FROM officials
        ORDER BY order_no, position, full_name`
     );
@@ -723,11 +1168,14 @@ app.get('/api/officials', async (req, res) => {
   }
 });
 
-// POST /api/officials (protected, with signature upload)
+// POST /api/officials (protected, with signature and photo upload)
 app.post(
   '/api/officials',
   verifyToken,
-  upload.single('signature'),
+  upload.fields([
+    { name: 'signature', maxCount: 1 },
+    { name: 'photo', maxCount: 1 }
+  ]),
   async (req, res) => {
     try {
       const { full_name, position, order_no, is_captain, is_secretary } =
@@ -739,14 +1187,21 @@ app.post(
           .json({ message: 'full_name and position are required.' });
       }
 
-      const signature_path = req.file
-        ? `/uploads/signatures/${req.file.filename}`
+      const signatureFile = req.files?.signature?.[0];
+      const photoFile = req.files?.photo?.[0];
+
+      const signature_path = signatureFile
+        ? `/uploads/signatures/${signatureFile.filename}`
+        : null;
+      
+      const photo_path = photoFile
+        ? `/uploads/photos/${photoFile.filename}`
         : null;
 
       const result = await query(
         `INSERT INTO officials
-         (full_name, position, order_no, is_captain, is_secretary, signature_path)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         (full_name, position, order_no, is_captain, is_secretary, signature_path, photo_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           full_name,
           position,
@@ -754,6 +1209,7 @@ app.post(
           is_captain === '1' ? 1 : 0,
           is_secretary === '1' ? 1 : 0,
           signature_path,
+          photo_path,
         ]
       );
 
@@ -769,52 +1225,53 @@ app.post(
   }
 );
 
-// PUT /api/officials/:id (protected, optional new signature)
+// PUT /api/officials/:id (protected, optional new signature and photo)
 app.put(
   '/api/officials/:id',
   verifyToken,
-  upload.single('signature'),
+  upload.fields([
+    { name: 'signature', maxCount: 1 },
+    { name: 'photo', maxCount: 1 }
+  ]),
   async (req, res) => {
     try {
       const { id } = req.params;
       const { full_name, position, order_no, is_captain, is_secretary } =
         req.body;
 
-      let signature_path = null;
+      const signatureFile = req.files?.signature?.[0];
+      const photoFile = req.files?.photo?.[0];
 
-      if (req.file) {
-        signature_path = `/uploads/signatures/${req.file.filename}`;
-        await query(
-          `UPDATE officials
-           SET full_name = ?, position = ?, order_no = ?,
-               is_captain = ?, is_secretary = ?, signature_path = ?
-           WHERE id = ?`,
-          [
-            full_name,
-            position,
-            order_no || 0,
-            is_captain === '1' ? 1 : 0,
-            is_secretary === '1' ? 1 : 0,
-            signature_path,
-            id,
-          ]
-        );
-      } else {
-        await query(
-          `UPDATE officials
-           SET full_name = ?, position = ?, order_no = ?,
-               is_captain = ?, is_secretary = ?
-           WHERE id = ?`,
-          [
-            full_name,
-            position,
-            order_no || 0,
-            is_captain === '1' ? 1 : 0,
-            is_secretary === '1' ? 1 : 0,
-            id,
-          ]
-        );
+      // Get current official data
+      const current = await query('SELECT * FROM officials WHERE id = ?', [id]);
+      if (current.length === 0) {
+        return res.status(404).json({ message: 'Official not found' });
       }
+
+      const signature_path = signatureFile
+        ? `/uploads/signatures/${signatureFile.filename}`
+        : current[0].signature_path;
+      
+      const photo_path = photoFile
+        ? `/uploads/photos/${photoFile.filename}`
+        : current[0].photo_path;
+
+      await query(
+        `UPDATE officials
+         SET full_name = ?, position = ?, order_no = ?,
+             is_captain = ?, is_secretary = ?, signature_path = ?, photo_path = ?
+         WHERE id = ?`,
+        [
+          full_name,
+          position,
+          order_no || 0,
+          is_captain === '1' ? 1 : 0,
+          is_secretary === '1' ? 1 : 0,
+          signature_path,
+          photo_path,
+          id,
+        ]
+      );
 
       const updated = await query('SELECT * FROM officials WHERE id = ?', [
         id,
@@ -839,8 +1296,139 @@ app.delete('/api/officials/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ===================== CERTIFICATES =====================
 
+// GET /api/certificates
+app.get('/api/certificates', async (req, res) => {
+  try {
+    const certificates = await query(
+      `SELECT c.*,
+              r.first_name,
+              r.last_name,
+              r.middle_name,
+              r.suffix
+       FROM certificates c
+       JOIN residents r ON r.id = c.resident_id
+       ORDER BY c.issue_date DESC, c.created_at DESC`
+    );
+    res.json(certificates);
+  } catch (err) {
+    console.error('Error fetching certificates:', err);
+    res.status(500).json({ message: 'Error fetching certificates' });
+  }
+});
 
+// POST /api/certificates (protected)
+app.post('/api/certificates', verifyToken, async (req, res) => {
+  try {
+    const {
+      resident_id,
+      certificate_type,
+      serial_number,
+      purpose,
+      issue_date,
+      place_issued,
+      amount,
+    } = req.body;
+
+    if (!resident_id || !certificate_type || !serial_number || !issue_date) {
+      return res.status(400).json({
+        message: 'resident_id, certificate_type, serial_number, and issue_date are required.',
+      });
+    }
+
+    // Check if serial number already exists
+    const existing = await query(
+      'SELECT id FROM certificates WHERE serial_number = ?',
+      [serial_number]
+    );
+    if (existing.length > 0) {
+      return res.status(400).json({ message: 'Serial number already exists.' });
+    }
+
+    const result = await query(
+      `INSERT INTO certificates
+       (resident_id, certificate_type, serial_number, purpose, issue_date, place_issued, amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        resident_id,
+        certificate_type,
+        serial_number,
+        purpose || null,
+        issue_date,
+        place_issued || null,
+        amount || null,
+      ]
+    );
+
+    const created = await query(
+      `SELECT c.*,
+              r.first_name,
+              r.last_name,
+              r.middle_name,
+              r.suffix
+       FROM certificates c
+       JOIN residents r ON r.id = c.resident_id
+       WHERE c.id = ?`,
+      [result.insertId]
+    );
+
+    // Log the certificate creation
+    const residentFullName = created[0] 
+      ? `${created[0].last_name}, ${created[0].first_name} ${created[0].middle_name ? `${created[0].middle_name.charAt(0)}.` : ''} ${created[0].suffix || ''}`.trim()
+      : null;
+    
+    const certificateTypeLabels = {
+      'residency': 'Certificate of Residency',
+      'indigency': 'Certificate of Indigency',
+      'clearance': 'Barangay Clearance',
+      'general': 'General Certificate',
+      'jobseeker': 'First Time Job Seeker (RA 11261)',
+      'oath': 'Oath of Undertaking',
+      'good_moral': 'Certificate of Good Moral'
+    };
+    
+    const certLabel = certificateTypeLabels[certificate_type] || certificate_type;
+    await createLog(
+      req,
+      `released the ${certLabel} of ${residentFullName || 'Unknown'}`,
+      'Certificates',
+      certificate_type,
+      resident_id,
+      residentFullName,
+      `Serial Number: ${serial_number}`
+    );
+
+    res.status(201).json(created[0]);
+  } catch (err) {
+    console.error('Error creating certificate:', err);
+    res.status(500).json({ message: 'Error creating certificate' });
+  }
+});
+
+// ===================== HISTORY LOGS =====================
+
+// GET /api/history-logs (protected, only Chairman and Secretary)
+app.get('/api/history-logs', verifyToken, async (req, res) => {
+  try {
+    // Check if user is Chairman or Secretary
+    if (req.user.role !== 'Chairman' && req.user.role !== 'Secretary') {
+      return res.status(403).json({ message: 'Access denied. Only Chairman and Secretary can view history logs.' });
+    }
+
+    const logs = await query(
+      `SELECT id, user_role, user_name, action, module_type, certificate_type, 
+              resident_name, details, created_at
+       FROM history_logs
+       ORDER BY created_at DESC
+       LIMIT 1000`
+    );
+    res.json(logs);
+  } catch (err) {
+    console.error('Error fetching history logs:', err);
+    res.status(500).json({ message: 'Error fetching history logs' });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

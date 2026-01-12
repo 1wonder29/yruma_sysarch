@@ -187,6 +187,16 @@ const HouseholdsPage = () => {
     setEditData(null);
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
@@ -382,6 +392,11 @@ const HouseholdsPage = () => {
                     <TableRow>
                       <TableCell>ID</TableCell>
                       <TableCell>Resident</TableCell>
+                      <TableCell>Age</TableCell>
+                      <TableCell>Date of Birth</TableCell>
+                      <TableCell>Contact Number</TableCell>
+                      <TableCell>Employment Status</TableCell>
+                      <TableCell>Civil Status</TableCell>
                       <TableCell>Relation</TableCell>
                     </TableRow>
                   </TableHead>
@@ -390,8 +405,13 @@ const HouseholdsPage = () => {
                       <TableRow key={m.id}>
                         <TableCell>{m.id}</TableCell>
                         <TableCell>
-                          {m.last_name}, {m.first_name}
+                          {m.last_name}, {m.first_name} {m.middle_name ? `${m.middle_name.charAt(0)}.` : ''} {m.suffix || ''}
                         </TableCell>
+                        <TableCell>{m.age !== null && m.age !== undefined ? m.age : '-'}</TableCell>
+                        <TableCell>{formatDate(m.birthdate)}</TableCell>
+                        <TableCell>{m.contact_no || '-'}</TableCell>
+                        <TableCell>{m.employment_status || '-'}</TableCell>
+                        <TableCell>{m.civil_status || '-'}</TableCell>
                         <TableCell>{m.relation_to_head || ''}</TableCell>
                       </TableRow>
                     ))}

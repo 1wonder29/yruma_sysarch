@@ -50,6 +50,7 @@ const OfficialsPage = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [signatureFile, setSignatureFile] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -79,6 +80,7 @@ const OfficialsPage = () => {
       ...emptyForm,
     });
     setSignatureFile(null);
+    setPhotoFile(null);
     setError('');
     setDialogOpen(true);
   };
@@ -93,6 +95,7 @@ const OfficialsPage = () => {
       is_secretary: !!off.is_secretary,
     });
     setSignatureFile(null);
+    setPhotoFile(null);
     setError('');
     setDialogOpen(true);
   };
@@ -117,9 +120,14 @@ const OfficialsPage = () => {
     }));
   };
 
-  const handleFileChange = (e) => {
+  const handleSignatureFileChange = (e) => {
     const file = e.target.files?.[0] || null;
     setSignatureFile(file);
+  };
+
+  const handlePhotoFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setPhotoFile(file);
   };
 
   const validateForm = () => {
@@ -145,6 +153,9 @@ const OfficialsPage = () => {
       fd.append('is_secretary', form.is_secretary ? '1' : '0');
       if (signatureFile) {
         fd.append('signature', signatureFile);
+      }
+      if (photoFile) {
+        fd.append('photo', photoFile);
       }
 
       if (form.id) {
@@ -221,13 +232,14 @@ const OfficialsPage = () => {
                   <TableCell>Captain</TableCell>
                   <TableCell>Secretary</TableCell>
                   <TableCell>Signature</TableCell>
+                  <TableCell>Photo</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {officials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       No officials encoded yet.
                     </TableCell>
                   </TableRow>
@@ -245,6 +257,17 @@ const OfficialsPage = () => {
                             src={`${API_ROOT}${o.signature_path}`}
                             alt="Signature"
                             style={{ height: 40 }}
+                          />
+                        ) : (
+                          <Typography variant="caption">None</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {o.photo_path ? (
+                          <img
+                            src={`${API_ROOT}${o.photo_path}`}
+                            alt="Photo"
+                            style={{ height: 60, width: 60, objectFit: 'cover', borderRadius: '50%' }}
                           />
                         ) : (
                           <Typography variant="caption">None</Typography>
@@ -329,19 +352,40 @@ const OfficialsPage = () => {
                 auto-fill Certificates.
               </Typography>
             </Grid>
-            <Grid item xs={12}>
-              <Button variant="outlined" component="label">
+            <Grid item xs={12} md={6}>
+              <Button variant="outlined" component="label" fullWidth>
                 {signatureFile ? 'Change Signature' : 'Upload Signature'}
                 <input
                   type="file"
                   hidden
                   accept="image/*"
-                  onChange={handleFileChange}
+                  onChange={handleSignatureFileChange}
                 />
               </Button>
               {signatureFile && (
-                <Typography variant="caption" sx={{ ml: 1 }}>
+                <Typography variant="caption" sx={{ ml: 1, display: 'block', mt: 0.5 }}>
                   {signatureFile.name}
+                </Typography>
+              )}
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Button variant="outlined" component="label" fullWidth>
+                {photoFile ? 'Change Photo' : 'Upload Photo'}
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={handlePhotoFileChange}
+                />
+              </Button>
+              {photoFile && (
+                <Typography variant="caption" sx={{ ml: 1, display: 'block', mt: 0.5 }}>
+                  {photoFile.name}
+                </Typography>
+              )}
+              {!photoFile && form.id && officials.find(o => o.id === form.id)?.photo_path && (
+                <Typography variant="caption" sx={{ ml: 1, display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                  Current photo will be kept if not changed
                 </Typography>
               )}
             </Grid>

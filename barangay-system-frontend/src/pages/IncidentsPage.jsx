@@ -48,6 +48,7 @@ const initialForm = {
   location: '',
   description: '',
   complainant_id: '',
+  complainant_name: '',
   respondent_id: '',
   status: 'Open',
 };
@@ -142,6 +143,17 @@ const IncidentsPage = () => {
     return `${r.last_name}, ${r.first_name}`;
   };
 
+  const getComplainantDisplay = (incident) => {
+    // Priority: complainant_name (manual entry) > resident name from complainant_id
+    if (incident.complainant_name) {
+      return incident.complainant_name;
+    }
+    if (incident.complainant_id) {
+      return residentName(incident.complainant_id);
+    }
+    return '';
+  };
+
   const formatDateTime = (value) => {
     if (!value) return '';
     const d = new Date(value);
@@ -159,7 +171,7 @@ const IncidentsPage = () => {
     const matchStatus = statusFilter === 'All' || i.status === statusFilter;
 
     // searchType/Location/Names
-    const complainant = residentName(i.complainant_id);
+    const complainant = getComplainantDisplay(i);
     const respondent = residentName(i.respondent_id);
     const haystack = (
       `${i.incident_type || ''} ${i.location || ''} ${complainant} ${respondent}`
@@ -309,9 +321,9 @@ const IncidentsPage = () => {
 
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
-                <InputLabel>Complainant</InputLabel>
+                <InputLabel>Complainant (Resident)</InputLabel>
                 <Select
-                  label="Complainant"
+                  label="Complainant (Resident)"
                   name="complainant_id"
                   value={form.complainant_id}
                   onChange={handleChange}
@@ -326,6 +338,17 @@ const IncidentsPage = () => {
                   ))}
                 </Select>
               </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Complainant Name / Reported By"
+                name="complainant_name"
+                value={form.complainant_name}
+                onChange={handleChange}
+                fullWidth
+                placeholder="Enter name if not a registered resident"
+                helperText="Name of the person who reported the incident"
+              />
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
@@ -463,7 +486,7 @@ const IncidentsPage = () => {
                 <TableCell>Date/Time</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Location</TableCell>
-                <TableCell>Complainant</TableCell>
+                <TableCell>Complainant / Reported By</TableCell>
                 <TableCell>Respondent</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="center">Actions</TableCell>
@@ -476,7 +499,7 @@ const IncidentsPage = () => {
                   <TableCell>{formatDateTime(i.incident_date)}</TableCell>
                   <TableCell>{i.incident_type}</TableCell>
                   <TableCell>{i.location || ''}</TableCell>
-                  <TableCell>{residentName(i.complainant_id)}</TableCell>
+                  <TableCell>{getComplainantDisplay(i) || '-'}</TableCell>
                   <TableCell>{residentName(i.respondent_id)}</TableCell>
                   <TableCell>{i.status}</TableCell>
                   <TableCell align="center">
@@ -565,9 +588,9 @@ const IncidentsPage = () => {
 
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
-                  <InputLabel>Complainant</InputLabel>
+                  <InputLabel>Complainant (Resident)</InputLabel>
                   <Select
-                    label="Complainant"
+                    label="Complainant (Resident)"
                     name="complainant_id"
                     value={editData.complainant_id || ''}
                     onChange={handleEditChange}
@@ -582,6 +605,17 @@ const IncidentsPage = () => {
                     ))}
                   </Select>
                 </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  label="Complainant Name / Reported By"
+                  name="complainant_name"
+                  value={editData.complainant_name || ''}
+                  onChange={handleEditChange}
+                  fullWidth
+                  placeholder="Enter name if not a registered resident"
+                  helperText="Name of the person who reported the incident"
+                />
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>

@@ -116,7 +116,8 @@ CREATE TABLE `officials` (
   `order_no` int(11) DEFAULT 0,
   `is_captain` tinyint(1) DEFAULT 0,
   `is_secretary` tinyint(1) DEFAULT 0,
-  `signature_path` varchar(255) DEFAULT NULL
+  `signature_path` varchar(255) DEFAULT NULL,
+  `photo_path` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -143,6 +144,7 @@ CREATE TABLE `residents` (
   `birthdate` date DEFAULT NULL,
   `civil_status` varchar(50) DEFAULT NULL,
   `contact_no` varchar(50) DEFAULT NULL,
+  `employment_status` enum('Working','Not Working') DEFAULT 'Not Working',
   `address` varchar(255) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -201,6 +203,44 @@ INSERT INTO `service_beneficiaries` (`id`, `service_id`, `resident_id`, `notes`,
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `certificates`
+--
+
+CREATE TABLE `certificates` (
+  `id` int(11) NOT NULL,
+  `resident_id` int(11) NOT NULL,
+  `certificate_type` varchar(50) NOT NULL,
+  `serial_number` varchar(100) NOT NULL,
+  `purpose` text DEFAULT NULL,
+  `issue_date` date NOT NULL,
+  `place_issued` varchar(150) DEFAULT NULL,
+  `amount` decimal(10,2) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `history_logs`
+--
+
+CREATE TABLE `history_logs` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `user_role` varchar(50) NOT NULL,
+  `user_name` varchar(150) NOT NULL,
+  `action` varchar(255) NOT NULL,
+  `module_type` varchar(100) DEFAULT NULL,
+  `certificate_type` varchar(50) DEFAULT NULL,
+  `resident_id` int(11) DEFAULT NULL,
+  `resident_name` varchar(255) DEFAULT NULL,
+  `details` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `users`
 --
 
@@ -209,7 +249,7 @@ CREATE TABLE `users` (
   `username` varchar(100) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
   `full_name` varchar(150) NOT NULL,
-  `role` enum('Admin','Staff') DEFAULT 'Staff',
+  `role` enum('Admin','Staff','Chairman','Secretary') DEFAULT 'Staff',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -279,6 +319,14 @@ ALTER TABLE `service_beneficiaries`
   ADD KEY `resident_id` (`resident_id`);
 
 --
+-- Indexes for table `certificates`
+--
+ALTER TABLE `certificates`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `resident_id` (`resident_id`),
+  ADD UNIQUE KEY `serial_number` (`serial_number`);
+
+--
 -- Indexes for table `users`
 --
 ALTER TABLE `users`
@@ -338,6 +386,18 @@ ALTER TABLE `service_beneficiaries`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
+-- AUTO_INCREMENT for table `certificates`
+--
+ALTER TABLE `certificates`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `history_logs`
+--
+ALTER TABLE `history_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
@@ -367,6 +427,19 @@ ALTER TABLE `incidents`
 ALTER TABLE `service_beneficiaries`
   ADD CONSTRAINT `service_beneficiaries_ibfk_1` FOREIGN KEY (`service_id`) REFERENCES `services` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `service_beneficiaries_ibfk_2` FOREIGN KEY (`resident_id`) REFERENCES `residents` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `certificates`
+--
+ALTER TABLE `certificates`
+  ADD CONSTRAINT `certificates_ibfk_1` FOREIGN KEY (`resident_id`) REFERENCES `residents` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `history_logs`
+--
+ALTER TABLE `history_logs`
+  ADD CONSTRAINT `history_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `history_logs_ibfk_2` FOREIGN KEY (`resident_id`) REFERENCES `residents` (`id`) ON DELETE SET NULL;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

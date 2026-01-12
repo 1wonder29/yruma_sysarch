@@ -38,7 +38,9 @@ const initialForm = {
   birthdate: '',
   civil_status: '',
   contact_no: '',
+  employment_status: 'Not Working',
   address: '',
+  citizenship: 'Filipino',
 };
 
 const ResidentsPage = () => {
@@ -53,6 +55,37 @@ const ResidentsPage = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editData, setEditData] = useState(null);
   const [updating, setUpdating] = useState(false);
+
+  // Format date for display (YYYY-MM-DD)
+  const formatDateForDisplay = (dateString) => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString; // Return original if invalid
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch (e) {
+      return dateString;
+    }
+  };
+
+  // Format date for table display (readable format)
+  const formatDateReadable = (dateString) => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateString;
+    }
+  };
 
   const fetchResidents = async () => {
     try {
@@ -92,7 +125,12 @@ const ResidentsPage = () => {
   };
 
   const handleEditClick = (resident) => {
-    setEditData({ ...resident });
+    // Format birthdate for date input (YYYY-MM-DD)
+    const formattedResident = {
+      ...resident,
+      birthdate: formatDateForDisplay(resident.birthdate)
+    };
+    setEditData(formattedResident);
     setEditOpen(true);
   };
 
@@ -123,8 +161,7 @@ const ResidentsPage = () => {
 
   const filteredResidents = residents.filter((r) => {
     const str = (
-      `${r.last_name} ${r.first_name} ${r.middle_name || ''} ${
-        r.address || ''
+      `${r.last_name} ${r.first_name} ${r.middle_name || ''} ${r.address || ''
       }`
     ).toLowerCase();
     const matchSearch = str.includes(search.toLowerCase());
@@ -227,11 +264,33 @@ const ResidentsPage = () => {
                 fullWidth
               />
             </Grid>
-            <Grid item xs={12} md={8}>
+            <Grid item xs={12} md={4}>
+              <TextField
+                select
+                label="Employment Status"
+                name="employment_status"
+                value={form.employment_status}
+                onChange={handleChange}
+                fullWidth
+              >
+                <MenuItem value="Working">Working</MenuItem>
+                <MenuItem value="Not Working">Not Working</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid item xs={12} md={4}>
               <TextField
                 label="Address"
                 name="address"
                 value={form.address}
+                onChange={handleChange}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                label="Citizenship"
+                name="citizenship"
+                value={form.citizenship}
                 onChange={handleChange}
                 fullWidth
               />
@@ -300,7 +359,9 @@ const ResidentsPage = () => {
                   <TableCell>Birthdate</TableCell>
                   <TableCell>Civil Status</TableCell>
                   <TableCell>Contact</TableCell>
+                  <TableCell>Employment Status</TableCell>
                   <TableCell>Address</TableCell>
+                  <TableCell>Citizenship</TableCell>
                   <TableCell align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
@@ -313,10 +374,12 @@ const ResidentsPage = () => {
                       {r.suffix || ''}
                     </TableCell>
                     <TableCell>{r.sex}</TableCell>
-                    <TableCell>{r.birthdate || ''}</TableCell>
+                    <TableCell>{formatDateReadable(r.birthdate)}</TableCell>
                     <TableCell>{r.civil_status || ''}</TableCell>
                     <TableCell>{r.contact_no || ''}</TableCell>
+                    <TableCell>{r.employment_status || '-'}</TableCell>
                     <TableCell>{r.address || ''}</TableCell>
+                    <TableCell>{r.citizenship || ''}</TableCell>
                     <TableCell align="center">
                       <IconButton
                         size="small"
@@ -422,11 +485,33 @@ const ResidentsPage = () => {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={12} md={8}>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  select
+                  label="Employment Status"
+                  name="employment_status"
+                  value={editData.employment_status || 'Not Working'}
+                  onChange={handleEditChange}
+                  fullWidth
+                >
+                  <MenuItem value="Working">Working</MenuItem>
+                  <MenuItem value="Not Working">Not Working</MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Address"
                   name="address"
                   value={editData.address || ''}
+                  onChange={handleEditChange}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  label="Citizenship"
+                  name="citizenship"
+                  value={editData.citizenship || ''}
                   onChange={handleEditChange}
                   fullWidth
                 />
