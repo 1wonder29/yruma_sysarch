@@ -176,7 +176,7 @@ app.post('/api/auth/register', async (req, res) => {
     const result = await query(
       `INSERT INTO users (username, password_hash, full_name, role)
        VALUES (?, ?, ?, ?)`,
-      [username, password_hash, full_name, role || 'Staff']
+      [username, password_hash, full_name, role || 'Chairman']
     );
 
     const created = await query('SELECT id, username, full_name, role FROM users WHERE id = ?', [

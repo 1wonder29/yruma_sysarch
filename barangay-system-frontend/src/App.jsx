@@ -111,7 +111,7 @@ const App = () => {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Box sx={{ minHeight: '100vh', backgroundColor: '#f8f9fa', background: 'linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Paper sx={{ p: 4, textAlign: 'center', maxWidth: 500 }}>
             <Typography variant="h5" color="error" gutterBottom>
               Access Denied
@@ -138,8 +138,22 @@ const App = () => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5' }}>
-        <AppBar position="static">
+      <Box sx={{ minHeight: '100vh', backgroundColor: '#f8f9fa', background: 'linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%)', position: 'relative',
+        '&::before': {
+          content: '""',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `url(${logo}) no-repeat center center`,
+          backgroundSize: 'contain',
+          opacity: 0.08,
+          zIndex: 0,
+          pointerEvents: 'none',
+        },
+      }}>
+        <AppBar position="static" sx={{ position: 'relative', zIndex: 1 }}>
           <Toolbar>
             <Box 
               sx={{ 
@@ -275,7 +289,7 @@ const App = () => {
           </Toolbar>
         </AppBar>
 
-        <Container maxWidth={false} sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
+        <Container maxWidth={false} sx={{ py: 3, px: { xs: 2, sm: 3 }, position: 'relative', zIndex: 1 }}>
           {renderPage()}
         </Container>
       </Box>

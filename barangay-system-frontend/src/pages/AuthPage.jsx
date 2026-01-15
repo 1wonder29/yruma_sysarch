@@ -9,7 +9,11 @@ import {
   Tabs,
   Tab,
   MenuItem,
+  IconButton,
+  InputAdornment,
 } from '@mui/material';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import api from '../api';
 import logo from '../assets/logo.png';
 
@@ -21,7 +25,7 @@ const AuthPage = ({ onLogin }) => {
     username: '',
     password: '',
     full_name: '',
-    role: 'Staff',
+    role: 'Chairman',
   });
 
   const [loadingLogin, setLoadingLogin] = useState(false);
@@ -29,12 +33,16 @@ const AuthPage = ({ onLogin }) => {
   const [errorLogin, setErrorLogin] = useState('');
   const [errorRegister, setErrorRegister] = useState('');
   const [successRegister, setSuccessRegister] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
   const handleTabChange = (e, newValue) => {
     setTab(newValue);
     setErrorLogin('');
     setErrorRegister('');
     setSuccessRegister('');
+    setShowLoginPassword(false);
+    setShowRegisterPassword(false);
   };
 
   const handleLoginChange = (e) => {
@@ -96,8 +104,9 @@ const AuthPage = ({ onLogin }) => {
         username: '',
         password: '',
         full_name: '',
-        role: 'Staff',
+        role: 'Chairman',
       });
+      setShowRegisterPassword(false);
     } catch (err) {
       console.error('Register error:', err);
       setErrorRegister(normalizeError(err, 'Registration failed'));
@@ -112,15 +121,55 @@ const AuthPage = ({ onLogin }) => {
       sx={{
         minHeight: '100vh',
         width: '100%',
-        bgcolor: '#f5f5f5',
+        backgroundColor: '#f8f9fa',
+        background: 'linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%)',
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column', // For vertically stacking potential footer/messages
         justifyContent: 'center', // Vertical centering
         alignItems: 'center', // Horizontal centering
         p: { xs: 2, sm: 4 },
+        '&::before': {
+          content: '""',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `url(${logo}) no-repeat center center`,
+          backgroundSize: 'contain',
+          opacity: 0.08,
+          zIndex: 0,
+          pointerEvents: 'none',
+        },
       }}
     >
-      <Box sx={{ width: '100%', maxWidth: 450 }}>
+      {/* Logo in the middle of the page */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          mb: 4,
+          position: 'relative',
+          zIndex: 1,
+        }}
+      >
+        <Box
+          component="img"
+          src={logo}
+          alt="Logo"
+          sx={{
+            width: { xs: 120, sm: 150 },
+            height: { xs: 120, sm: 150 },
+            borderRadius: '50%',
+            objectFit: 'cover',
+            filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.3))',
+            border: '4px solid rgba(255,255,255,0.3)',
+          }}
+        />
+      </Box>
+      <Box sx={{ width: '100%', maxWidth: 450, position: 'relative', zIndex: 1 }}>
         <Paper
           sx={{
             p: { xs: 3, sm: 5 },
@@ -196,11 +245,24 @@ const AuthPage = ({ onLogin }) => {
                 margin="normal"
                 label="Password"
                 name="password"
-                type="password"
+                type={showLoginPassword ? 'text' : 'password'}
                 value={loginForm.password}
                 onChange={handleLoginChange}
                 fullWidth
                 required
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        edge="end"
+                        aria-label="toggle password visibility"
+                      >
+                        {showLoginPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
               {errorLogin && (
                 <Typography color="error" variant="body2" sx={{ mt: 1 }}>
@@ -243,11 +305,24 @@ const AuthPage = ({ onLogin }) => {
                 margin="normal"
                 label="Password"
                 name="password"
-                type="password"
+                type={showRegisterPassword ? 'text' : 'password'}
                 value={registerForm.password}
                 onChange={handleRegisterChange}
                 fullWidth
                 required
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowRegisterPassword(!showRegisterPassword)}
+                        edge="end"
+                        aria-label="toggle password visibility"
+                      >
+                        {showRegisterPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
               <TextField
                 select
@@ -258,8 +333,6 @@ const AuthPage = ({ onLogin }) => {
                 onChange={handleRegisterChange}
                 fullWidth
               >
-                <MenuItem value="Admin">Admin</MenuItem>
-                <MenuItem value="Staff">Staff</MenuItem>
                 <MenuItem value="Chairman">Chairman</MenuItem>
                 <MenuItem value="Secretary">Secretary</MenuItem>
               </TextField>
